@@ -17,6 +17,8 @@ export function sampleChannel(channel, time, fallback = [0, 0, 0]) {
   if (end < 0) return vector(values.get(keys.at(-1)), fallback);
   const first = values.get(keys[end-1]), second = values.get(keys[end]);
   const a = vector(first?.post ?? first, fallback), b = vector(second?.pre ?? second, fallback);
+  // YSMFolderDeserializer also accepts "step": hold the start value.
+  if (first?.lerp_mode === 'step') return a;
   const fraction = (time-keys[end-1])/(keys[end]-keys[end-1]);
   // GeckoLib/YSM selects the destination keyframe's easing when it is
   // Catmull-Rom, otherwise it inherits the start keyframe's easing. Either

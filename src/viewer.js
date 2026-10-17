@@ -3,15 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildBedrockModel } from './bedrock.js';
 import { YsmControllerRuntime, mergeControllerFiles, normalizeControllers } from './ysm-controller.js';
 import { YsmSkeleton } from './skeleton.js';
-import { YsmAnimationPlayer, createYsmAnimationContext, advanceYsmPhysics, evaluateMolang, executeMolangStatements } from './ysm-animation.js';
-import { encodeApng } from './apng.js';
-import { DEFAULT_MODEL_BASE } from './model-config.js';
-
-async function loadJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
-  return response.json();
-}
+import { createYsmAnimationContext, advanceYsmPhysics } from './ysm-animation.js';
 
 function parseJsonInWorker(file){
   if(typeof Worker==='undefined'||typeof URL.createObjectURL!=='function')return file.text().then(JSON.parse);
@@ -44,15 +36,14 @@ async function loadLegacyTexture(url) {
   return {texture,hasTranslucency};
 }
 
-async function loadCardLayer(file,fallbackFile,declaredPath,id,baseUrl){
+async function loadCardLayer(file,fallbackFile,declaredPath,id){
   const path=String(declaredPath||'').replaceAll('\\','/').replace(/^\/+/, '');
   if(!path)return null;
-  const candidates=[file?{file}:null,baseUrl?{url:`${baseUrl}${path.split('/').map(encodeURIComponent).join('/')}`}:null,fallbackFile?{file:fallbackFile}:null,...(baseUrl&&path!==`background/${id}.png`?[{url:`${baseUrl}background/${id}.png`}]:[])].filter(Boolean);
+  const candidates=[file,fallbackFile].filter(Boolean);
   for(const candidate of candidates){
     let objectUrl;
     try{
-      if(candidate.file)objectUrl=URL.createObjectURL(candidate.file);
-      else {const response=await fetch(candidate.url);if(!response.ok)continue;objectUrl=URL.createObjectURL(await response.blob());}
+      objectUrl=URL.createObjectURL(candidate);
       const image=new Image();image.src=objectUrl;await image.decode();
       return {url:objectUrl,image,owned:true};
     }catch(error){if(objectUrl)URL.revokeObjectURL(objectUrl);console.warn(`Could not load ${id}:`,error);}
@@ -100,39 +91,35 @@ export class ModelViewer {
 
   async load() {
     const source=this.fileMap;
+    if(!source?.model)throw new Error('未提供模型文件');
     this.time=0;this.elapsedTime=0;
-    const metadata=source?(source.metadata?await source.metadata.text().then(JSON.parse):{}):await loadJson(`${DEFAULT_MODEL_BASE}ysm.json`).catch(()=>({}));
+    const metadata=source.metadata?await source.metadata.text().then(JSON.parse):{};
     const props=metadata.properties||metadata.metadata?.properties||{};
     this.releaseCardLayers();
     const cardLayers=await Promise.all([
-      loadCardLayer(source?.cardBackground,source?.cardBackgroundFallback,props.gui_background,'gui_background',source?null:DEFAULT_MODEL_BASE),
-      loadCardLayer(source?.cardForeground,source?.cardForegroundFallback,props.gui_foreground,'gui_foreground',source?null:DEFAULT_MODEL_BASE),
+      loadCardLayer(source.cardBackground,source.cardBackgroundFallback,props.gui_background,'gui_background'),
+      loadCardLayer(source.cardForeground,source.cardForegroundFallback,props.gui_foreground,'gui_foreground'),
     ]);
     this.cardLayerObjectUrls=cardLayers.filter(Boolean).map(layer=>layer.url);
     this.cardBackgroundUrl=cardLayers[0]?.url||null;this.cardForegroundUrl=cardLayers[1]?.url||null;
     this.cardBackgroundImage=cardLayers[0]?.image||null;this.cardForegroundImage=cardLayers[1]?.image||null;
-    const declaredAnimations=metadata.files?.player?.animation||{};
-    const declaredAnimationEntries=Object.entries(declaredAnimations).map(([id,path])=>({id,path}));
-    const animationEntries=source?.animationFiles?.length?source.animationFiles:source?[...(source.animation?[{id:'main',file:source.animation}]:[]),...(source.extraAnimation?[{id:'extra',file:source.extraAnimation}]:[])]:declaredAnimationEntries.length?declaredAnimationEntries:[{id:'main',path:'animations/main.animation.json'},{id:'extra',path:'animations/extra.animation.json'}];
-    const declaredControllerPaths=Array.isArray(metadata.files?.player?.animation_controllers)?metadata.files.player.animation_controllers:[];
-    const controllerEntries=source?.controllerFiles?.length?source.controllerFiles:source?[]:declaredControllerPaths.map(path=>({path}));
+    const animationEntries=source.animationFiles?.length?source.animationFiles:[...(source.animation?[{id:'main',file:source.animation}]:[]),...(source.extraAnimation?[{id:'extra',file:source.extraAnimation}]:[])];
+    const controllerEntries=source.controllerFiles||[];
     const loadEntry=async entry=>{
-      if(entry.file)return parseJsonInWorker(entry.file);
-      if(entry.path)return loadJson(`${DEFAULT_MODEL_BASE}${String(entry.path).replaceAll('\\','/').split('/').map(encodeURIComponent).join('/')}`);
-      return null;
+      return entry.file?parseJsonInWorker(entry.file):null;
     };
     const [model,animationFiles,controllerFiles]=await Promise.all([
-      source?source.model.text().then(JSON.parse):loadJson(`${DEFAULT_MODEL_BASE}models/main.json`),
+      source.model.text().then(JSON.parse),
       Promise.all(animationEntries.map(entry=>loadEntry(entry).catch(error=>{console.warn(`Could not load animation file ${entry.path||entry.id}:`,error);return null;}))),
       Promise.all(controllerEntries.map(entry=>loadEntry(entry).catch(error=>{console.warn(`Could not load controller file ${entry.path}:`,error);return null;}))),
     ]);
     const animations={};for(const file of animationFiles)Object.assign(animations,file?.animations||{});
     const controllers=mergeControllerFiles(controllerFiles.filter(Boolean));
-    const variants=textureSources(source,metadata,DEFAULT_MODEL_BASE);
+    const variants=textureSources(source);
     this.textureVariants=(await Promise.all(variants.map(async entry=>{
       let objectUrl;
       try{
-        const url=entry.file?(objectUrl=URL.createObjectURL(entry.file)):entry.url;
+        const url=objectUrl=URL.createObjectURL(entry.file);
         return {...entry,...await loadLegacyTexture(url)};
       }catch(error){console.warn(`Could not load texture ${entry.label}:`,error);return null;}
       finally{if(objectUrl)URL.revokeObjectURL(objectUrl);}
@@ -163,7 +150,6 @@ export class ModelViewer {
     installGpuSkinning(this.translucentMaterial,this.root.userData.boneTexture);
     this.bones=this.root.userData.bones; this.animations=animations;
     this.skeleton=new YsmSkeleton(this.root.userData.skeletonBones);
-    this.animationPlayer=new YsmAnimationPlayer(this.skeleton);
     this.animationContext=createYsmAnimationContext();
     this.bindAnimationContext(this.animationContext);
     // YSM's folder schema places properties at the document root. Also accept
@@ -185,7 +171,8 @@ export class ModelViewer {
     // IGeoRenderer applies height_scale to X/Z and width_scale to Y.
     this.modelScale=new THREE.Vector3(heightScale,widthScale,heightScale);
     this.rootPose=new THREE.Matrix4().makeScale(this.modelScale.x,this.modelScale.y,this.modelScale.z);
-    this.controllerRuntime=new YsmControllerRuntime(normalizeControllers(controllers));
+    this.controllerDefinitions=normalizeControllers(controllers);
+    this.controllerRuntime=new YsmControllerRuntime(this.controllerDefinitions,this.animations);
     this.scene.add(this.root);
     // Render the authored model pose first. Animation sampling is kept out of
     // the base render path because YSM's Molang helper layers are not
@@ -195,7 +182,7 @@ export class ModelViewer {
   }
 
   async loadFiles(fileMap) {
-    if(this.coverAnimationPromise)await this.coverAnimationPromise.catch(()=>{});
+    this.stopCardPreview();
     if(this.root){ this.scene.remove(this.root); this.root.traverse(node=>node.geometry?.dispose()); this.root.userData.boneTexture?.dispose(); this.root=null; }
     this.material?.dispose();this.translucentMaterial?.dispose();
     for(const entry of this.textureVariants||[]){entry.texture.dispose();entry.texture.image?.close?.();}
@@ -273,133 +260,162 @@ export class ModelViewer {
     target[path.at(-1)]=inlineValue?Number(inlineValue[1]):value;
     this.applyFrame();this.renderer.render(this.scene,this.camera);return true;
   }
-  async generateCoverApng({width=300,height=400,fullCardHeight=null,fps=60,duration=null,forceDuration=false,startTime=0,staticFrame=false,includeCardChrome=false,title=''}={}) {
-    const animationName=this.previewAnimationName&&this.animations?.[this.previewAnimationName]?this.previewAnimationName:null;
-    if(!animationName)return null;
-    const animation=this.animations[animationName];
-    const animationDuration=Math.max(.1,Number(animation?.animation_length)||1);
-    const requestedDuration=Math.max(.1,Number(duration)||5);
-    const renderDuration=forceDuration?requestedDuration:Math.min(animationDuration,requestedDuration);
-    const requestedStart=Math.max(0,Number(startTime)||0);
-    const frameStart=requestedStart%animationDuration;
-    const count=staticFrame?1:Math.max(2,Math.ceil(renderDuration*fps));
-    const saved={time:this.time,elapsedTime:this.elapsedTime,animationName:this.animationName,playing:this.playing,active:this.active,animationPlayer:this.animationPlayer,animationContext:this.animationContext,controllerCurrent:new Map(this.controllerRuntime?.current||[]),controllerEntered:new Set(this.controllerRuntime?.entered||[]),rotation:this.root.rotation.clone(),position:this.root.position.clone(),scale:this.root.scale.clone(),rootPose:this.rootPose.clone(),visibility:this.root.userData.getBoneVisibility(),grid:this.grid.visible};
-    this.setActive(false);this.playing=false;this.animationName=animationName;this.animationPlayer=new YsmAnimationPlayer(this.skeleton);this.animationContext=createYsmAnimationContext();this.bindAnimationContext(this.animationContext);this.grid.visible=false;
+  // ---- Character card (YSM model picker preview) ----
+  get cardAnimationName(){return this.previewAnimationName&&this.animations?.[this.previewAnimationName]?this.previewAnimationName:null;}
+  createCardState(){
+    // The GUI card uses the preview entity: its own Molang context and a
+    // controller pipeline that skips armor controllers.
+    const context=createYsmAnimationContext();this.bindAnimationContext(context);
+    return {context,runtime:new YsmControllerRuntime(this.controllerDefinitions,this.animations,{preview:true}),time:0,elapsed:0};
+  }
+  // Applies the card animation state and ModelPreviewRenderer's pose, runs fn,
+  // then restores the main viewer's state. The bone texture is left holding
+  // the card pose; the main loop re-applies its own frame before rendering.
+  withCardPose(state,guiHeight,fn){
+    const saved={time:this.time,elapsedTime:this.elapsedTime,animationName:this.animationName,animationContext:this.animationContext,controllerRuntime:this.controllerRuntime,quaternion:this.root.quaternion.clone(),position:this.root.position.clone(),scale:this.root.scale.clone(),rootPose:this.rootPose.clone(),grid:this.grid.visible};
     // Match ModelPreviewRenderer.renderLivingEntityPreview and ModelButton:
-    // the source button is 52x90, clips the preview to 52x70, and draws at
-    // GUI scale 30. The entity yaw is 200° (or 180° when rotation is disabled),
-    // while the ordinary front pose is 180°; the renderer also pitches the
-    // outer preview transform by -10° (or 0° when disabled).
-    const previewPose=previewCardPose(this.disablePreviewRotation);
-    const outputPerGuiPixel=width/52,guiHeight=height/outputPerGuiPixel;
+    // the 52x90 button clips the preview to 52x70 and draws at GUI scale 30.
+    // The entity yaw is 200° (180° with rotation disabled) and the outer
+    // transform is pitched by -10° (0° when disabled).
+    const pose=previewCardPose(this.disablePreviewRotation);
+    this.animationName=this.cardAnimationName;this.animationContext=state.context;this.controllerRuntime=state.runtime;
+    this.time=state.time;this.elapsedTime=state.elapsed;this.grid.visible=false;
     this.rootPose.identity();
     this.root.scale.set(this.modelScale.x*30,this.modelScale.y*30,this.modelScale.z*30);
-    const previewTilt=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),THREE.MathUtils.degToRad(previewPose.pitch));
-    const previewYawRotation=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),THREE.MathUtils.degToRad(previewPose.yawOffset));
-    this.root.quaternion.copy(previewTilt).multiply(previewYawRotation);
-    // ModelButton renders at y + height/2 + 20 in a 90px button, so the
-    // character's ground line is 65 GUI pixels from the clipped preview top.
-    const previewBaseline=previewPose.baseline;
-    // root.position is in GUI render units; only the canvas projection uses
-    // outputPerGuiPixel. Multiplying here moves the model out of the frame.
-    this.root.position.set(0,guiHeight/2-previewBaseline,0);
-    const cardHeight=includeCardChrome?Math.max(height,Number(fullCardHeight)||Math.round(height*9/7)):height;
-    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
-    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:false,preserveDrawingBuffer:true});renderer.setPixelRatio(1);renderer.setSize(width,height,false);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0x000000,0);
-    // This is a fixed GUI-scale orthographic view, not a perspective camera
-    // fitted to guessed character bounds. At 300px output width, 52 GUI pixels
-    // map directly to the generated cover width; the 70px scissor maps to its
-    // full visible height.
-    const camera=new THREE.OrthographicCamera(-26,26,guiHeight/2,-guiHeight/2,0.01,5000);
-    // Bedrock's model front faces -Z; the GUI renderer's Z flip is handled
-    // here by viewing the unmirrored model from its front side.
+    const tilt=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),THREE.MathUtils.degToRad(pose.pitch));
+    const yaw=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),THREE.MathUtils.degToRad(pose.yawOffset));
+    this.root.quaternion.copy(tilt).multiply(yaw);
+    // ModelButton renders at y + height/2 + 20, so the ground line sits 65 GUI
+    // pixels below the clipped preview top (root.position is in GUI units).
+    this.root.position.set(0,guiHeight/2-pose.baseline,0);
+    try{return fn();}
+    finally{
+      this.time=saved.time;this.elapsedTime=saved.elapsedTime;this.animationName=saved.animationName;this.animationContext=saved.animationContext;this.controllerRuntime=saved.controllerRuntime;
+      this.root.quaternion.copy(saved.quaternion);this.root.position.copy(saved.position);this.root.scale.copy(saved.scale);this.rootPose.copy(saved.rootPose);this.grid.visible=saved.grid;
+    }
+  }
+  // Fixed GUI-scale orthographic view: 52 GUI pixels span the card width.
+  cardCamera(width,height){
+    const guiHeight=height/(width/52),camera=new THREE.OrthographicCamera(-26,26,guiHeight/2,-guiHeight/2,0.01,5000);
+    // Bedrock's model front faces -Z; view the unmirrored model from the front.
     camera.position.set(0,0,-1000);camera.lookAt(0,0,0);camera.updateProjectionMatrix();
-    const surface=document.createElement('canvas');surface.width=width;surface.height=cardHeight;const ctx=surface.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=false;const frames=[];
+    return {camera,guiHeight};
+  }
+  /** Plays the preview animation live in the sidebar card canvas. */
+  startCardPreview(canvas,{duration=5,onTime=null}={}){
+    this.stopCardPreview();
+    if(!this.cardAnimationName||!this.root)return false;
+    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:false});
+    renderer.setPixelRatio(1);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0x000000,0);
+    this.card={canvas,renderer,duration:Math.max(0.1,Number(duration)||5),onTime,playing:true,dirty:true,state:this.createCardState(),camera:null,guiHeight:0};
+    this.card.observer=new ResizeObserver(()=>this.resizeCard());this.card.observer.observe(canvas);
+    this.resizeCard();this.ensureLoop();
+    return true;
+  }
+  stopCardPreview(){
+    if(!this.card)return;
+    this.card.observer.disconnect();this.card.renderer.dispose();this.card=null;
+  }
+  resizeCard(){
+    const card=this.card;if(!card)return;
+    const bounds=card.canvas.getBoundingClientRect(),ratio=window.devicePixelRatio||1;
+    const width=Math.max(1,Math.round(bounds.width*ratio)),height=Math.max(1,Math.round(bounds.height*ratio));
+    card.renderer.setSize(width,height,false);
+    Object.assign(card,this.cardCamera(width,height));card.dirty=true;this.ensureLoop();
+  }
+  setCardPlaying(playing){if(!this.card)return;this.card.playing=Boolean(playing);this.card.dirty=true;this.ensureLoop();}
+  /** Jumps the card to a time without re-simulating physics or controllers. */
+  seekCard(time){
+    const card=this.card;if(!card)return;
+    const target=Math.min(card.duration,Math.max(0,Number(time)||0));
+    if(target<card.state.elapsed)card.state=this.createCardState();
+    card.state.elapsed=target;card.state.time=target;card.dirty=true;this.ensureLoop();
+  }
+  advanceCard(delta){
+    const card=this.card,state=card.state;
+    state.elapsed+=delta;
+    // Loop the (capped) preview duration from a fresh state, like the in-game
+    // preview restarting its animation.
+    if(state.elapsed>card.duration){card.state=this.createCardState();return;}
+    state.time=state.elapsed;advanceYsmPhysics(state.context,delta);
+  }
+  renderCard(){
+    const card=this.card;if(!card?.camera)return;
+    this.withCardPose(card.state,card.guiHeight,()=>{this.applyFrame(true);card.renderer.render(this.scene,card.camera);});
+    card.dirty=false;card.onTime?.(card.state.time,card.duration);
+  }
+  /**
+   * Renders the card frame at `time` seconds (with background, foreground and
+   * title) as a PNG.
+   */
+  async renderCardImage({width=300,height=400,fullCardHeight=null,includeCardChrome=true,title='',time=0}={}){
+    if(!this.cardAnimationName||!this.root)return null;
+    const cardHeight=includeCardChrome?Math.max(height,Number(fullCardHeight)||Math.round(height*9/7)):height;
+    this.renderSuspended=true;
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:false,preserveDrawingBuffer:true});
+    renderer.setPixelRatio(1);renderer.setSize(width,height,false);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0x000000,0);
     try{
-      // Initialize controller timelines and the bone texture before frame 0.
-      this.animationPlayer=new YsmAnimationPlayer(this.skeleton);this.animationContext=createYsmAnimationContext();
-      this.controllerRuntime?.reset();
-      this.elapsedTime=frameStart;this.time=frameStart%animationDuration;this.applyFrame(true);
+      const {camera,guiHeight}=this.cardCamera(width,height),state=this.createCardState();
+      this.withCardPose(state,guiHeight,()=>this.applyFrame(true));
+      // Jump to the requested time; timeline events in between still run once.
+      const target=Math.max(0,Number(time)||0);
+      if(target>0){state.elapsed=target;state.time=target;this.withCardPose(state,guiHeight,()=>this.applyFrame(true));}
       await renderer.compileAsync(this.scene,camera);
-      renderer.render(this.scene,camera);renderer.getContext().finish();
-      // Sampling the animation twice keeps the camera stable for the whole
-      // loop, rather than fitting only its first pose.
-      // Match model-card playback's ~60 Hz physics/timeline cadence and APNG
-      // output cadence so every simulated pose is represented in the file.
-      const simulationStep=1/60;let simulationTime=0;
-      for(let i=0;i<count;i++){
-        const frameTime=Math.min(frameStart+i/fps,frameStart+renderDuration);
-        while(simulationTime+simulationStep<=frameTime+1e-8){
-          simulationTime+=simulationStep;
-          this.elapsedTime=simulationTime;this.time=simulationTime%animationDuration;
-          advanceYsmPhysics(this.animationContext,simulationStep);
-          this.applyFrame(true);
-        }
-        // Evaluate the pose at the exact output timestamp without replaying
-        // stateful timeline/controller scripts between simulation ticks.
-        this.elapsedTime=frameTime;this.time=frameTime%animationDuration;this.applyFrame(false);
-        renderer.render(this.scene,camera);
-        // drawImage(WebGLCanvas) may otherwise read the preserved buffer while
-        // the GPU is still processing the pose/visibility texture uploads.
-        renderer.getContext().finish();
-        ctx.clearRect(0,0,width,cardHeight);
-        if(includeCardChrome){if(this.cardBackgroundImage)ctx.drawImage(this.cardBackgroundImage,0,0,width,cardHeight);ctx.drawImage(canvas,0,0,width,height);if(this.cardForegroundImage)ctx.drawImage(this.cardForegroundImage,0,0,width,cardHeight);drawCardTitle(ctx,title,width,height,cardHeight);}
-        else ctx.drawImage(canvas,0,0,width,height);
-        if(!staticFrame)frames.push(ctx.getImageData(0,0,width,cardHeight));
-      }
-      if(staticFrame)return await new Promise((resolve,reject)=>surface.toBlob(blob=>blob?resolve(blob):reject(new Error('无法生成静态 PNG')), 'image/png'));
-      return await encodeApng(frames,width,cardHeight,1000/fps);
-    } finally {
-      renderer.dispose();
-      for(let i=0;i<saved.visibility.length;i++)if(saved.visibility[i])this.root.userData.setBoneVisible(this.root.userData.skeletonBones[i].name,true);
-      for(let i=0;i<saved.visibility.length;i++)if(!saved.visibility[i])this.root.userData.setBoneVisible(this.root.userData.skeletonBones[i].name,false);
-      this.root.rotation.copy(saved.rotation);this.root.position.copy(saved.position);this.root.scale.copy(saved.scale);this.rootPose.copy(saved.rootPose);if(this.controllerRuntime){this.controllerRuntime.current=saved.controllerCurrent;this.controllerRuntime.entered=saved.controllerEntered;}this.time=saved.time;this.elapsedTime=saved.elapsedTime;this.animationName=saved.animationName;this.playing=saved.playing;this.animationPlayer=saved.animationPlayer;this.animationContext=saved.animationContext;this.grid.visible=saved.grid;this.applyFrame();this.setActive(saved.active);
+      this.withCardPose(state,guiHeight,()=>{this.applyFrame(false);renderer.render(this.scene,camera);});
+      renderer.getContext().finish();
+      const surface=document.createElement('canvas');surface.width=width;surface.height=cardHeight;
+      const ctx=surface.getContext('2d');ctx.imageSmoothingEnabled=false;
+      if(includeCardChrome&&this.cardBackgroundImage)ctx.drawImage(this.cardBackgroundImage,0,0,width,cardHeight);
+      ctx.drawImage(canvas,0,0,width,height);
+      if(includeCardChrome){if(this.cardForegroundImage)ctx.drawImage(this.cardForegroundImage,0,0,width,cardHeight);drawCardTitle(ctx,title,width,height,cardHeight);}
+      return await new Promise((resolve,reject)=>surface.toBlob(blob=>blob?resolve(blob):reject(new Error('无法生成人物卡 PNG')),'image/png'));
+    }finally{
+      renderer.dispose();this.renderSuspended=false;
+      if(this.card)this.card.dirty=true;
+      this.applyFrame(false);this.ensureLoop();
     }
   }
   seek(time) { this.time=Math.max(0,Math.min(time,this.duration));this.playing=false;this.applyFrame();this.onTime(this.time,this.duration); }
   setActive(active) {
     if(this.active===active)return; this.active=active;
-    if(active){this.resize();this.lastTime=performance.now();this.frame=requestAnimationFrame(this.tick);}
-    else cancelAnimationFrame(this.frame);
+    if(active){this.resize();this.ensureLoop();}
+  }
+  // One animation loop drives both the 3D view (when its tab is visible) and
+  // the sidebar card, which stays live on every tab.
+  ensureLoop(){
+    if(this.frame||(!this.active&&!this.card))return;
+    this.lastTime=performance.now();this.frame=requestAnimationFrame(this.tick);
   }
   tick(now) {
-    if(!this.active)return;
+    this.frame=0;
+    if(!this.active&&!this.card)return;
     const delta=Math.max(0,Math.min((now-this.lastTime)/1000,0.1));this.lastTime=now;
-    if(!document.hidden){
-      if(this.playing){const elapsed=delta*this.speed;this.time=(this.time+elapsed)%this.duration;this.elapsedTime+=elapsed;advanceYsmPhysics(this.animationContext,elapsed);}
-      this.applyFrame();this.controls.update(delta);this.renderer.render(this.scene,this.camera);
-      this.onTime(this.time,this.duration);
+    if(!document.hidden&&!this.renderSuspended){
+      if(this.card){if(this.card.playing){this.advanceCard(delta);this.card.dirty=true;}if(this.card.dirty)this.renderCard();}
+      if(this.active){
+        if(this.playing){const elapsed=delta*this.speed;this.time=(this.time+elapsed)%this.duration;this.elapsedTime+=elapsed;advanceYsmPhysics(this.animationContext,elapsed);}
+        this.applyFrame();this.controls.update(delta);this.renderer.render(this.scene,this.camera);
+        this.onTime(this.time,this.duration);
+      }
     }
     this.frame=requestAnimationFrame(this.tick);
   }
   applyFrame(advanceTimeline=true) {
     if(!this.skeleton||!this.root)return;
-    // Keep the game's player layers in order: pre-parallel, pre-main,
-    // selected state animation, post-main, then parallel overlays.
+    // Layers follow the game's controller order (see ysm-controller.js).
     this.skeleton.reset();
     const context=this.animationContext;
     context.time=this.time;context.lifeTime=this.elapsedTime;context.query.anim_time=this.time;context.query.life_time=this.elapsedTime;
     context.ctrl.playing_extra_animation=this.extraAnimationNames?.has(this.animationName)?1:0;
     for(const name of ['idle','walk','run','jump'])context.ctrl[name]=this.animationName===name?1:0;
-    if(advanceTimeline)this.controllerRuntime?.update(context,evaluateMolang,executeMolangStatements);
-    const active=this.controllerRuntime?.activeAnimations(context,evaluateMolang)||[];
-    const applyEntries=(entries,time)=>{context.query.anim_time=time;for(const {name} of entries){const clip=this.animations?.[name];if(clip)this.animationPlayer.apply(clip,time,context,advanceTimeline);}};
-    const applySlot=(slot,fallbackPrefix=null)=>{
-      const matcher=new RegExp(`^player\\.${slot}(?:_|$)`),controllers=[...this.controllerRuntime.controllers.keys()].filter(name=>matcher.test(name));
-      const entries=active.filter(entry=>controllers.includes(entry.controller));
-      if(controllers.length)applyEntries(entries,this.elapsedTime);
-      else if(fallbackPrefix){const names=Object.keys(this.animations||{}).filter(name=>name.startsWith(fallbackPrefix)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));applyEntries(names.map(name=>({name})),this.elapsedTime);}
-    };
-    applySlot('pre_parallel','pre_parallel');
-    applySlot('pre_main');
-    const main=this.animations?.[this.animationName];if(main)this.animationPlayer.apply(main,this.time,context,advanceTimeline);
-    applySlot('post_main');
-    applySlot('parallel','parallel');
+    this.controllerRuntime?.apply({skeleton:this.skeleton,context,now:this.elapsedTime,main:this.animationName?{name:this.animationName,time:this.time}:null,advance:advanceTimeline});
     const matrices=this.skeleton.computeMatrices(this.rootPose);
     this.root.userData.setAnimationBoneVisibility(this.skeleton.visible);
     this.root.userData.updateBoneTexture(matrices,this.skeleton.normalMatrices);
   }
-  screenshot(filename='ysm-preview',watermark={}) {
+  /** Renders the current view without the grid and resolves to a PNG blob. */
+  screenshot(watermark={}) {
     const gridVisible=this.grid.visible;let image;
     try{
       this.grid.visible=false;this.renderer.render(this.scene,this.camera);
@@ -409,11 +425,10 @@ export class ModelViewer {
       }else image=this.canvas.toDataURL('image/png');
     }
     finally{this.grid.visible=gridVisible;this.renderer.render(this.scene,this.camera);}
-    const safeName=String(filename||'ysm-preview').replace(/[\\/:*?"<>|]/g,'_').slice(0,100)||'ysm-preview';
-    const link=document.createElement('a');link.download=`${safeName}.png`;link.href=image;link.click();
+    return fetch(image).then(response=>response.blob());
   }
   dispose() {
-    this.setActive(false);this.resizeObserver.disconnect();this.canvas.removeEventListener('wheel',this.onWheel);this.controls.dispose();
+    this.setActive(false);this.stopCardPreview();if(this.frame)cancelAnimationFrame(this.frame);this.frame=0;this.resizeObserver.disconnect();this.canvas.removeEventListener('wheel',this.onWheel);this.controls.dispose();
     this.root?.traverse(o=>o.geometry?.dispose());this.root?.userData.boneTexture?.dispose();this.material?.dispose();this.translucentMaterial?.dispose();
     for(const entry of this.textureVariants||[]){entry.texture.dispose();entry.texture.image?.close?.();}
     this.releaseCardLayers();
@@ -503,24 +518,13 @@ function extendCoverBounds(bounds,geometry,matrix){
   for(const group of geometry.groups){if(!group.count)continue;const first=(group.start/6)*4,last=first+(group.count/6)*4;for(let v=first;v<last;v++){const i=v*3;point.set(p[i],p[i+1],p[i+2]).applyMatrix4(matrix);bounds.expandByPoint(point);}}
 }
 
-function textureSources(source,metadata,defaultBase=DEFAULT_MODEL_BASE){
-  if(source){
-    const provided=Array.isArray(source.textures)?source.textures:source.texture?[{file:source.texture}]:[];
-    return provided.map((entry,index)=>{
-      const file=entry.file||entry;
-      const path=entry.path||file.webkitRelativePath?.split('/').slice(1).join('/')||file.name||`texture-${index+1}`;
-      return {id:entry.id||path,path,label:entry.label||textureLabel(path),file};
-    });
-  }
-  const declared=metadata.files?.player?.texture;
-  const entries=Array.isArray(declared)?declared:declared?[declared]:['textures/素体512.png'];
-  return entries.map((entry,index)=>{
-    const raw=typeof entry==='string'?entry:entry?.uv;
-    if(typeof raw!=='string')return null;
-    const path=raw.replaceAll('\\','/').replace(/^\/+/, '');
-    if(path.split('/').includes('..'))return null;
-    return {id:entry?.id||path,path,label:entry?.name||textureLabel(path),url:`${defaultBase}${path}`};
-  }).filter(Boolean);
+function textureSources(source){
+  const provided=Array.isArray(source.textures)?source.textures:source.texture?[{file:source.texture}]:[];
+  return provided.map((entry,index)=>{
+    const file=entry.file||entry;
+    const path=entry.path||file.webkitRelativePath?.split('/').slice(1).join('/')||file.name||`texture-${index+1}`;
+    return {id:entry.id||path,path,label:entry.label||textureLabel(path),file};
+  });
 }
 
 function textureLabel(path){
