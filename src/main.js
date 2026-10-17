@@ -29,7 +29,10 @@ function minecraftTextRuns(value){
   flush();return runs;
 }
 const escapeText=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
-const minecraftRunStyle=run=>[run.color?`color:${run.color}`:'',run.bold?'font-weight:700':'',run.italic?'font-style:italic':'',run.underline||run.strike?`text-decoration:${[run.underline?'underline':'',run.strike?'line-through':''].filter(Boolean).join(' ')}`:''].filter(Boolean).join(';');
+// Minecraft draws text with a 1px shadow in the same hue at 25% brightness,
+// which keeps light codes such as §e and §b readable on light backgrounds.
+const minecraftShadow=color=>{const hex=/^#([0-9a-f]{6})$/i.exec(color);if(!hex)return '';const value=Number.parseInt(hex[1],16);return `1px 1px 0 rgb(${(value>>16&255)>>2},${(value>>8&255)>>2},${(value&255)>>2})`;};
+const minecraftRunStyle=run=>[run.color?`color:${run.color};--mc-shadow:${minecraftShadow(run.color)}`:'',run.bold?'font-weight:700':'',run.italic?'font-style:italic':'',run.underline||run.strike?`text-decoration:${[run.underline?'underline':'',run.strike?'line-through':''].filter(Boolean).join(' ')}`:''].filter(Boolean).join(';');
 const minecraftTextHtml=value=>minecraftTextRuns(value).map(run=>{const style=minecraftRunStyle(run);return `<span${style?` style="${style}"`:''}>${escapeText(run.text)}</span>`;}).join('');
 const minecraftTextSvg=value=>minecraftTextRuns(value).map(run=>{const style=minecraftRunStyle(run);return `<tspan${style?` style="${style.replaceAll('color:','fill:')}"`:''}>${escapeText(run.text)}</tspan>`;}).join('');
 const stripWheelMarker=value=>String(value??'').replace(/^((?:§x(?:§[0-9a-f]){6}|§[0-9a-fk-or])*)#/i,'$1');
@@ -57,7 +60,7 @@ document.querySelector('#app').innerHTML = `
           <section class="detail-section"><div class="section-title"><h2>${icon('users')} 作者</h2><span id="author-count">来自模型包信息</span></div><div class="author-grid" id="author-grid"></div></section>
           <section class="detail-section" id="mod-support-section"><div class="section-title"><h2>${icon('boxes')} 模组动作</h2><span id="mod-count">未提供适配信息</span></div><div class="mod-grid" id="mod-grid"></div></section>
           <section class="detail-section" id="model-links-section"><div class="section-title"><h2>${icon('link')} 相关链接</h2></div><div class="link-grid" id="model-links"></div></section>
-          <section class="license-card" id="model-license"><div class="license-symbol">${icon('shield-check')}</div><div class="license-body"><div class="license-title"><h2 id="license-name">许可信息</h2><span>模型授权</span></div><p id="license-description"></p><div class="permissions" id="license-permissions"></div></div><a id="license-link" href="https://creativecommons.org/publicdomain/zero/1.0/" ${external} aria-label="查看授权信息">${icon('arrow-up-right')}</a></section>
+          <section class="license-card" id="model-license"><div class="license-symbol">${icon('shield-check')}</div><div class="license-body"><div class="license-title"><h2 id="license-name">许可信息</h2><span>模型授权</span></div><p id="license-description"></p></div></section>
         </div>
         <div id="preview-panel" role="tabpanel" aria-labelledby="tab-preview" hidden>
           <div class="viewer-shell" id="viewer-shell"><div id="viewport"><canvas id="scene" aria-label="三维模型预览，拖动旋转，滚轮缩放"></canvas><div class="loading-state" id="loading-state"><span class="spinner"></span><strong>正在准备模型</strong><span>加载几何、贴图与动画…</span></div><div class="viewer-tools"><button class="icon-button" id="pose-walk" title="走" aria-label="走">${materialIcon('directions_walk')}</button><button class="icon-button" id="pose-run" title="跑" aria-label="跑">${materialIcon('directions_run')}</button><button class="icon-button" id="pose-jump" title="跳" aria-label="跳">${materialIcon('arrow_upward')}</button><button class="icon-button" id="action-wheel-button" title="动作轮盘" aria-label="动作轮盘" aria-haspopup="menu" aria-expanded="false">${materialIcon('donut_large')}</button><button class="wheel-close-button" id="action-wheel-close" type="button" aria-label="关闭动作轮盘" title="关闭轮盘" hidden>${materialIcon('close')}</button><button class="icon-button" id="center-view-button" title="居中视角" aria-label="居中视角">${materialIcon('filter_center_focus')}</button><button class="icon-button" id="reset-pose-button" title="重置姿势" aria-label="重置姿势">${materialIcon('restart_alt')}</button><button class="icon-button" id="fullscreen-button" title="全屏" aria-label="全屏">${materialIcon('fullscreen')}</button><div class="texture-picker" id="texture-picker" hidden><button class="texture-picker-trigger" id="texture-picker-trigger" type="button" aria-label="选择材质" title="选择材质" aria-haspopup="listbox" aria-expanded="false"><span id="texture-current">texture</span>${icon('chevron-down')}</button><div class="texture-picker-options" id="texture-picker-options" role="listbox" aria-label="模型材质" hidden></div></div></div><div class="capture-panel" role="group" aria-label="截图与水印"><div class="capture-fields"><span class="capture-status" id="render-status" role="status">准备加载</span><div class="capture-row"><label class="md-outlined-field"><input id="watermark-text" type="text" maxlength="40" placeholder=" " autocomplete="off"><span>水印文字</span></label><label class="md-switch" title="启用截图水印"><input id="watermark-enabled" type="checkbox" role="switch" aria-label="启用截图水印"><span class="md-switch-track"><span class="md-switch-handle"></span></span></label></div><div class="capture-row"><label class="md-color" title="水印文字颜色"><input id="watermark-color" type="color" value="#ffffff" aria-label="水印文字颜色"></label><label class="md-slider" title="水印透明度"><span class="material-symbol-icon" aria-hidden="true">opacity</span><input id="watermark-opacity" class="md-range" type="range" min="0" max="100" value="20" aria-label="水印透明度"></label></div></div><button class="md-fab" id="take-screenshot-button" type="button" title="截图（全屏时可按 F2）" aria-label="截图">${materialIcon('photo_camera')}</button></div><div class="action-wheel" id="action-wheel" role="menu" aria-label="选择模型动作" hidden></div><div class="view-presets"><button class="selected" data-view="front">正面</button><button data-view="side">侧面</button><button data-view="back">背面</button></div><div class="axis-widget" aria-hidden="true"><span>Y</span><span>Z</span><span>X</span></div><div class="viewport-hint">${icon('mouse-pointer-2')} 拖动旋转 <span>·</span> 滚轮缩放 <span>·</span> 右键平移</div></div>
@@ -83,7 +86,7 @@ function resetCardDuration(duration=DEFAULT_CARD_DURATION){cardDurationValue=Mat
 let avatarObjectUrls=[];
 const safeExternalUrl=value=>{try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)?url.href:'';}catch{return '';}};
 function renderMinecraftText(target,value){
-  for(const run of minecraftTextRuns(value)){const span=document.createElement('span');span.className='minecraft-title-text';span.textContent=run.text;if(run.color)span.style.color=run.color;if(run.bold)span.style.fontWeight='700';if(run.italic)span.style.fontStyle='italic';if(run.underline||run.strike)span.style.textDecoration=[run.underline?'underline':'',run.strike?'line-through':''].filter(Boolean).join(' ');target.append(span);}
+  for(const run of minecraftTextRuns(value)){const span=document.createElement('span');span.className='minecraft-title-text';span.textContent=run.text;if(run.color){span.style.color=run.color;span.style.setProperty('--mc-shadow',minecraftShadow(run.color));}if(run.bold)span.style.fontWeight='700';if(run.italic)span.style.fontStyle='italic';if(run.underline||run.strike)span.style.textDecoration=[run.underline?'underline':'',run.strike?'line-through':''].filter(Boolean).join(' ');target.append(span);}
 }
 function renderModelMetadata(ysmJson,avatarFiles,isImported=false){
   const metadata=ysmJson?.metadata||{},authors=Array.isArray(metadata.authors)?metadata.authors:[],files=avatarFiles instanceof Map?avatarFiles:new Map();
@@ -103,18 +106,18 @@ function renderModelMetadata(ysmJson,avatarFiles,isImported=false){
   const authorGrid=document.querySelector('#author-grid');authorGrid.replaceChildren();
   for(const author of authors){
     const card=document.createElement('article');card.className='author-card';
-    const image=document.createElement('img');image.alt=author.name?`${author.name}的头像`:'作者头像';
+    const image=document.createElement('img');image.alt=author.name?`${wheelText(author.name)}的头像`:'作者头像';
     const avatarPath=String(author.avatar||'').replace(/^\.?\//,'').replace(/\\/g,'/');
     const avatarFile=files.get(avatarPath.toLowerCase());
     if(avatarFile){const url=URL.createObjectURL(avatarFile);avatarObjectUrls.push(url);image.src=url;}
     else image.hidden=true;
     image.onerror=()=>{image.hidden=true;};
     const copy=document.createElement('div');copy.className='author-copy';
-    const name=document.createElement('strong');name.textContent=author.name||'未命名作者';copy.append(name);
-    if(author.comment){const comment=document.createElement('p');comment.className='author-comment';comment.textContent=author.comment;copy.append(comment);}
-    const role=document.createElement('span');role.className='role-tag';role.textContent=author.role||'作者';
+    const name=document.createElement('strong');renderMinecraftText(name,author.name||'未命名作者');copy.append(name);
+    if(author.comment){const comment=document.createElement('p');comment.className='author-comment';renderMinecraftText(comment,author.comment);copy.append(comment);}
+    const role=document.createElement('span');role.className='role-tag';renderMinecraftText(role,author.role||'作者');
     const contacts=document.createElement('div');contacts.className='author-contacts';
-    for(const [platform,value] of Object.entries(author.contact||{})){const href=safeExternalUrl(value);if(!href)continue;const link=document.createElement('a');link.href=href;link.target='_blank';link.rel='noopener noreferrer';link.textContent=platform;link.title=`${author.name||'作者'} · ${platform}`;contacts.append(link);}
+    for(const [platform,value] of Object.entries(author.contact||{})){const href=safeExternalUrl(value);if(!href)continue;const link=document.createElement('a');link.href=href;link.target='_blank';link.rel='noopener noreferrer';link.textContent=platform;link.title=`${wheelText(author.name||'作者')} · ${platform}`;contacts.append(link);}
     card.append(image,copy,role);if(contacts.childElementCount)card.append(contacts);authorGrid.append(card);
   }
   if(!authors.length){const empty=document.createElement('p');empty.className='author-empty';empty.textContent='这个模型包没有提供作者信息。';authorGrid.append(empty);}
@@ -147,14 +150,15 @@ function renderModelMetadata(ysmJson,avatarFiles,isImported=false){
     name.textContent=key==='donate'?'支持作者':'主页';desc.textContent=new URL(href).host;copy.append(name,desc);link.append(iconWrap,copy);link.insertAdjacentHTML('beforeend',icon('arrow-up-right'));linkGrid.append(link);
   }
   document.querySelector('#model-links-section').hidden=!linkGrid.childElementCount;
-  const license=metadata.license||{},licenseType=String(license.type||'未提供').trim(),normalized=licenseType.toLowerCase().replace(/[\s_-]/g,'');
-  const isCc0=normalized==='cc0'||normalized==='cczero'||normalized==='cc0.0';
-  document.querySelector('#license-name').textContent=isCc0?'CC0 公共领域':licenseType;
-  document.querySelector('#license-description').textContent=license.desc||(isCc0?'作者放弃权利，可自由使用，无需署名。':'模型包未提供授权说明。');
-  const permissions=document.querySelector('#license-permissions');permissions.replaceChildren();
-  if(isCc0)for(const label of ['自由分享','允许修改','可商业使用']){const item=document.createElement('span');item.innerHTML=icon('check');item.append(document.createTextNode(` ${label}`));permissions.append(item);}
-  const licenseLink=document.querySelector('#license-link');licenseLink.hidden=!isCc0;if(isCc0)licenseLink.href='https://creativecommons.org/publicdomain/zero/1.0/';
-  document.querySelector('#model-license').hidden=!licenseType||licenseType==='未提供';
+  // License text comes only from the pack (metadata.license.type / desc), shown with
+  // its Minecraft formatting like YSM's "协议：%s" tooltip.
+  const license=metadata.license&&typeof metadata.license==='object'?metadata.license:{type:metadata.license};
+  const licenseType=String(license.type??'').trim(),licenseDesc=String(license.desc??'').trim();
+  const licenseName=document.querySelector('#license-name');licenseName.replaceChildren();renderMinecraftText(licenseName,licenseType);
+  const licenseDescription=document.querySelector('#license-description');licenseDescription.replaceChildren();
+  if(licenseDesc)renderMinecraftText(licenseDescription,licenseDesc);
+  licenseDescription.hidden=!licenseDesc;
+  document.querySelector('#model-license').hidden=!licenseType;
   
 }
 const FIRST_PERSON_ANIMATION=/^fp[._]arm$/i;
@@ -270,7 +274,7 @@ async function loadImportedModel(byPath,sourceName){
   if(legacyLayout&&!importedBedrockModel?.bones)throw new Error('根目录 main.json 中没有 minecraft:geometry 骨骼数据');
   if(legacyLayout&&!metadata.metadata){
     const geometry=importedBedrockModel,info=geometry?.description?.ysm_extra_info||{};
-    metadata.metadata={name:info.name||geometry?.description?.identifier||'旧版 YSM 模型',tips:info.tips||'',authors:(info.authors||[]).map(name=>typeof name==='string'?{name}:name),license:{type:info.license||'未提供'}};
+    metadata.metadata={name:info.name||geometry?.description?.identifier||'旧版 YSM 模型',tips:info.tips||'',authors:(info.authors||[]).map(name=>typeof name==='string'?{name}:name),license:{type:info.license||''}};
     metadata.properties={preview_animation:'idle'};
   }
   const viewerMetadataFile=metadataFile||new File([JSON.stringify(metadata)],'ysm.json',{type:'application/json'});

@@ -117,10 +117,10 @@ input:focus-visible{outline:none}
 .material-symbol-icon{font-family:"Material Symbols Outlined";font-weight:400;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;white-space:nowrap;word-wrap:normal;direction:ltr;display:inline-grid;place-items:center;flex:0 0 auto;width:1em;height:1em;overflow:hidden;-webkit-font-feature-settings:"liga";font-feature-settings:"liga";-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24;user-select:none}
 
 /* State layer: hover 8%, focus 10%, pressed 10% of the content color. */
-.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color,#license-link{position:relative;isolation:isolate}
-.icon-button::before,.md-button::before,.tabs button::before,.link-grid>a::before,.author-contacts a::before,.texture-picker-trigger::before,.texture-picker-option::before,.wheel-crumb:not(.is-current)::before,.action-wheel-controls button::before,.wheel-sector-gear-button::before,.wheel-settings>header button::before,.md-fab::before,.md-color::before,#license-link::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:currentColor;opacity:0;pointer-events:none;transition:opacity 15ms linear}
-:is(.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color,#license-link):hover:not(:disabled)::before{opacity:.08}
-:is(.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color,#license-link):is(:focus-visible,:active):not(:disabled)::before{opacity:.1}
+.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color{position:relative;isolation:isolate}
+.icon-button::before,.md-button::before,.tabs button::before,.link-grid>a::before,.author-contacts a::before,.texture-picker-trigger::before,.texture-picker-option::before,.wheel-crumb:not(.is-current)::before,.action-wheel-controls button::before,.wheel-sector-gear-button::before,.wheel-settings>header button::before,.md-fab::before,.md-color::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:currentColor;opacity:0;pointer-events:none;transition:opacity 15ms linear}
+:is(.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color):hover:not(:disabled)::before{opacity:.08}
+:is(.icon-button,.md-button,.tabs button,.link-grid>a,.author-contacts a,.texture-picker-trigger,.texture-picker-option,.wheel-crumb:not(.is-current),.action-wheel-controls button,.wheel-sector-gear-button,.wheel-settings>header button,.md-fab,.md-color):is(:focus-visible,:active):not(:disabled)::before{opacity:.1}
 
 /* Legacy catalogue markup that the local viewer does not show. */
 .top-nav,.local-badge,.original-button,.breadcrumb,.title-row,.cover-badge,.cover-preview,.download-actions,.sidebar-meta,.sidebar-note,.tabs button:disabled,.animation-panel,.preview-note,.view-presets,.viewport-hint,.axis-widget,footer{display:none!important}
@@ -209,7 +209,7 @@ input:focus-visible{outline:none}
 
 /* Filled card for model-authored Minecraft-formatted text. */
 .model-description-text{padding:16px;border-radius:var(--md-sys-shape-corner-medium);background:var(--ysm-text-surface);color:var(--ysm-text-on-surface);font-size:14px;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere}
-.model-description-text .minecraft-title-text{text-shadow:1px 1px 0 #0006}
+.model-description-text .minecraft-title-text{text-shadow:var(--mc-shadow,1px 1px 0 #0006)}
 :root:has(.cover-card.is-empty) .model-description-text{background:var(--md-sys-color-surface-container);color:var(--md-sys-color-on-surface-variant)}
 :root:has(.cover-card.is-empty) .model-description-text .minecraft-title-text{text-shadow:none}
 
@@ -244,13 +244,8 @@ input:focus-visible{outline:none}
 .license-body{flex:1;min-width:0}
 .license-title{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .license-title h2{font-size:16px;line-height:24px;font-weight:500;letter-spacing:.15px}
-.license-title span{height:24px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-small);font-size:12px;line-height:16px;font-weight:500;letter-spacing:.5px;color:var(--md-sys-color-on-surface-variant)}
+.license-title>span{height:24px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-small);font-size:12px;line-height:16px;font-weight:500;letter-spacing:.5px;color:var(--md-sys-color-on-surface-variant)}
 .license-body p{margin:4px 0 0;font-size:14px;line-height:20px;color:var(--md-sys-color-on-surface-variant)}
-.permissions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.permissions:empty{display:none}
-.permissions span{height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 16px 0 8px;border:1px solid var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-small);font-size:14px;line-height:20px;font-weight:500;letter-spacing:.1px}
-.permissions .material-symbol-icon{font-size:18px;color:var(--md-sys-color-primary)}
-#license-link{width:40px;height:40px;flex:0 0 40px;display:grid;place-items:center;border-radius:50%;color:var(--md-sys-color-on-surface-variant)}
 
 /* ---------- 3D preview surface ---------- */
 .viewer-shell{margin-top:16px;border-radius:var(--md-sys-shape-corner-large);overflow:hidden;background:var(--md-sys-color-surface-container-low)}
@@ -418,7 +413,7 @@ input:focus-visible{outline:none}
 .viewer-shell:fullscreen .wheel-settings{width:clamp(320px,32vw,480px)}
 
 /* Minecraft-formatted titles keep the game's subtle text shadow. */
-.minecraft-title-text{text-shadow:0 1px 2px #0006}
+.minecraft-title-text{text-shadow:var(--mc-shadow)}
 
 /* ---------- Snackbar ---------- */
 .toast{position:fixed;left:50%;bottom:24px;z-index:30;min-width:min(344px,calc(100vw - 32px));max-width:min(600px,calc(100vw - 32px));min-height:48px;display:flex;align-items:center;padding:14px 16px;border-radius:var(--md-sys-shape-corner-extra-small);background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);box-shadow:var(--md-sys-elevation-3);font-size:14px;line-height:20px;letter-spacing:.25px;opacity:0;transform:translate(-50%,8px) scale(.96);transition:opacity .15s linear,transform .25s var(--md-sys-motion-easing-emphasized-decelerate)}
