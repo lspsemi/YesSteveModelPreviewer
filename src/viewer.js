@@ -244,7 +244,7 @@ export class ModelViewer {
    */
   setAnimation(name,{once=false}={}) {
     const animation=this.animations[name];if(!animation)return;
-    this.audio?.stopAll();this.controllerRuntime?.restartMain(name);
+    this.controllerRuntime?.restartMain(name);
     this.animationName=name;this.time=0;this.playing=true;
     this.playMode=once?(animationLoopMode(animation)==='hold'?'hold':'once'):'loop';
     this.applyFrame();

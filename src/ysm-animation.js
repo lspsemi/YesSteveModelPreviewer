@@ -119,10 +119,18 @@ export function createYsmAnimationContext(){
   ysm.bone_rot=name=>context.boneRotationResolver?.(String(name??''))||{x:0,y:0,z:0};
   // SoundFunction: play_sound(id, name[, flags[, volume[, pitch]]]); flag 4 loops.
   // Contexts without an audio player (the character card) stay silent.
-  context.audio=null;
-  ysm.play_sound=(id,name,flags=0,volume=1,pitch=1)=>context.audio?.play(name,{id,loop:(Number(flags)&4)===4,volume:Number(volume)||1,pitch:Number(pitch)||1})?1:0;
-  ysm.stop_sound=id=>context.audio?.stop(id)?1:0;
-  ysm.stop_all_sounds=()=>{context.audio?.stopAll();return 1;};
+  // context.audioChannel is the channel of the controller being evaluated
+  // (set by YsmControllerRuntime); flag 2 / global:true uses the global one.
+  context.audio=null;context.audioChannel=null;
+  const channelFor=global=>global?context.audio?.global:(context.audioChannel||context.audio?.global);
+  // Numeric ids: 0 is untracked and negative ids are rejected (SoundFunction).
+  const soundId=id=>typeof id==='number'?(id<0?undefined:id===0?0:`n:${id}`):`s:${id}`;
+  ysm.play_sound=(id,name,flags=0,volume=1,pitch=1)=>{
+    const key=soundId(id),bits=Number(flags)||0;if(key===undefined||bits<0||bits>7)return 0;
+    return channelFor(bits&2)?.play(name,{id:key,force:(bits&1)===1,loop:(bits&4)===4,volume:Number(volume)||1,pitch:Number(pitch)||1})?1:0;
+  };
+  ysm.stop_sound=(id,global=0)=>{const key=soundId(id);return key&&channelFor(global)?.stop(key)?1:0;};
+  ysm.stop_all_sounds=(global=0)=>{channelFor(global)?.stopAll();return 1;};
   return context;
 }
 
@@ -228,7 +236,7 @@ export function executeTimeline(animation,time,ctx,state,loop){
   const length=animationLength(animation);
   let current=time,cycle=0;
   if(loop&&length>0&&Number.isFinite(length)){cycle=Math.floor(time/length);current=time%length;}
-  const run=(event)=>{if(event.compiled)runStatementList(event.compiled,ctx);else ctx.audio?.play(event.sound);};
+  const run=(event)=>{if(event.compiled)runStatementList(event.compiled,ctx);else (ctx.audioChannel||ctx.audio?.global)?.play(event.sound);};
   if(state.last<0){for(const e of events)if(e.t<=current)run(e);}
   else if(cycle!==state.cycle||current<state.last){for(const e of events)if(e.t>state.last||e.t<=current)run(e);}
   else for(const e of events)if(e.t>state.last&&e.t<=current)run(e);

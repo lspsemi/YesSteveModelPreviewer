@@ -100,7 +100,8 @@ class ControllerInstance {
   enter(stateName,state,context,now){
     if(this.state)executeMolangStatements(this.state.on_exit,context);
     executeMolangStatements(state.on_entry,context);
-    for(const effect of state.sound_effects||[])context.audio?.play(effect);
+    context.audioChannel?.stopAll();
+    for(const effect of state.sound_effects||[])context.audioChannel?.play(effect);
     this.stateName=stateName;this.state=state;this.enterTime=now;
     const playsClips=stateName!==BUILTIN_STATE&&!stateName.startsWith(ENTRY_STATE_PREFIX);
     this.slots=playsClips?state.animations.map(entry=>({name:entry.name,condition:entry.condition,active:true,timeline:{last:-1,cycle:0}})):[];
@@ -207,20 +208,25 @@ export class YsmControllerRuntime {
     if(this.advance){context.query.anim_time=request.time;executeTimeline(animation,request.time,context,this.timeline(`main:${request.name}`),loop);}
     sampleInto(layer,animation,request.time,loop?'loop':'hold',context,this.index);
   }
-  /** Restarts the main clip's timeline so its events and sounds fire again. */
-  restartMain(name){this.timelines.delete(`main:${name}`);}
+  /** Restarts the main clip: its timeline fires again and its old sounds stop. */
+  restartMain(name){
+    this.timelines.delete(`main:${name}`);
+    for(const entry of this.layers)if(entry.main||entry.instance?.name==='player.main')entry.channel?.stopAll();
+  }
   apply({skeleton,context,now,main,advance=true}){
     if(!this.layer||this.layer.flags.length!==skeleton.count)this.layer=new BoneLayer(skeleton.count);
     this.index=skeleton.index;this.advance=advance;this.mainRequest=main;
     const layer=this.layer,animations=this.animations;
     for(const entry of this.layers){
       layer.clear();
+      if(context.audio&&!entry.channel)entry.channel=context.audio.createChannel();
+      context.audioChannel=context.audio?entry.channel:null;
       if(entry.instance){if(advance)entry.instance.update(context,now,animations);entry.instance.contribute(layer,context,now,animations,this.index);}
       else if(entry.main)this.sampleMain(layer,context);
       else entry.builtin(layer,context,now);
       layer.writeTo(skeleton,entry.additive&&(!entry.instance||entry.instance.stateName===BUILTIN_STATE));
     }
-    context.query.anim_time=main?.time??now;
+    context.audioChannel=null;context.query.anim_time=main?.time??now;
   }
 }
 
