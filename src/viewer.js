@@ -3,7 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildBedrockModel } from './bedrock.js';
 import { YsmControllerRuntime, mergeControllerFiles, normalizeControllers } from './ysm-controller.js';
 import { YsmSkeleton } from './skeleton.js';
-import { createYsmAnimationContext, advanceYsmPhysics } from './ysm-animation.js';
+import { createYsmAnimationContext, advanceYsmPhysics, animationLength, animationLoopMode } from './ysm-animation.js';
+import { YsmAudio } from './audio.js';
 
 function parseJsonInWorker(file){
   if(typeof Worker==='undefined'||typeof URL.createObjectURL!=='function')return file.text().then(JSON.parse);
@@ -151,6 +152,7 @@ export class ModelViewer {
     this.bones=this.root.userData.bones; this.animations=animations;
     this.skeleton=new YsmSkeleton(this.root.userData.skeletonBones);
     this.animationContext=createYsmAnimationContext();
+    this.audio?.dispose();this.audio=new YsmAudio(source.soundFiles);this.animationContext.audio=this.audio;
     this.bindAnimationContext(this.animationContext);
     // YSM's folder schema places properties at the document root. Also accept
     // older metadata-wrapped exports so plugin options are not silently lost.
@@ -235,7 +237,18 @@ export class ModelViewer {
     else this.camera.position.set(center.x,center.y,center.z+(view==='back'?distance:-distance));
     this.controls.update();
   }
-  setAnimation(name) { if(!this.animations[name])return;this.animationName=name;this.time=0;this.playing=true;this.applyFrame(); }
+  /**
+   * Plays a clip in the main slot. Locomotion loops; wheel actions pass
+   * once:true to play the clip a single time (hold_on_last_frame clips then
+   * keep their final pose, others report onAnimationEnd).
+   */
+  setAnimation(name,{once=false}={}) {
+    const animation=this.animations[name];if(!animation)return;
+    this.audio?.stopAll();this.controllerRuntime?.restartMain(name);
+    this.animationName=name;this.time=0;this.playing=true;
+    this.playMode=once?(animationLoopMode(animation)==='hold'?'hold':'once'):'loop';
+    this.applyFrame();
+  }
   bindAnimationContext(context) {
     context.boneRotationResolver=name=>{
       const id=this.skeleton?.index.get(name);if(id===undefined)return {x:0,y:0,z:0};
@@ -379,6 +392,7 @@ export class ModelViewer {
   seek(time) { this.time=Math.max(0,Math.min(time,this.duration));this.playing=false;this.applyFrame();this.onTime(this.time,this.duration); }
   setActive(active) {
     if(this.active===active)return; this.active=active;
+    if(!active)this.audio?.stopAll();
     if(active){this.resize();this.ensureLoop();}
   }
   // One animation loop drives both the 3D view (when its tab is visible) and
@@ -394,7 +408,16 @@ export class ModelViewer {
     if(!document.hidden&&!this.renderSuspended){
       if(this.card){if(this.card.playing){this.advanceCard(delta);this.card.dirty=true;}if(this.card.dirty)this.renderCard();}
       if(this.active){
-        if(this.playing){const elapsed=delta*this.speed;this.time=(this.time+elapsed)%this.duration;this.elapsedTime+=elapsed;advanceYsmPhysics(this.animationContext,elapsed);}
+        if(this.playing){
+          const elapsed=delta*this.speed;this.elapsedTime+=elapsed;advanceYsmPhysics(this.animationContext,elapsed);
+          if(!this.playMode||this.playMode==='loop')this.time=(this.time+elapsed)%this.duration;
+          else{
+            // A clip without animation_length never ends (it simply holds its last keyframes).
+            const length=animationLength(this.animations?.[this.animationName]);
+            this.time+=elapsed;
+            if(this.time>=length){this.time=length;if(this.playMode==='once'){this.playMode='hold';this.onAnimationEnd?.(this.animationName);}}
+          }
+        }
         this.applyFrame();this.controls.update(delta);this.renderer.render(this.scene,this.camera);
         this.onTime(this.time,this.duration);
       }
@@ -409,7 +432,7 @@ export class ModelViewer {
     context.time=this.time;context.lifeTime=this.elapsedTime;context.query.anim_time=this.time;context.query.life_time=this.elapsedTime;
     context.ctrl.playing_extra_animation=this.extraAnimationNames?.has(this.animationName)?1:0;
     for(const name of ['idle','walk','run','jump'])context.ctrl[name]=this.animationName===name?1:0;
-    this.controllerRuntime?.apply({skeleton:this.skeleton,context,now:this.elapsedTime,main:this.animationName?{name:this.animationName,time:this.time}:null,advance:advanceTimeline});
+    this.controllerRuntime?.apply({skeleton:this.skeleton,context,now:this.elapsedTime,main:this.animationName?{name:this.animationName,time:this.time,loop:!this.playMode||this.playMode==='loop'}:null,advance:advanceTimeline});
     const matrices=this.skeleton.computeMatrices(this.rootPose);
     this.root.userData.setAnimationBoneVisibility(this.skeleton.visible);
     this.root.userData.updateBoneTexture(matrices,this.skeleton.normalMatrices);
@@ -428,7 +451,7 @@ export class ModelViewer {
     return fetch(image).then(response=>response.blob());
   }
   dispose() {
-    this.setActive(false);this.stopCardPreview();if(this.frame)cancelAnimationFrame(this.frame);this.frame=0;this.resizeObserver.disconnect();this.canvas.removeEventListener('wheel',this.onWheel);this.controls.dispose();
+    this.setActive(false);this.stopCardPreview();this.audio?.dispose();this.audio=null;if(this.frame)cancelAnimationFrame(this.frame);this.frame=0;this.resizeObserver.disconnect();this.canvas.removeEventListener('wheel',this.onWheel);this.controls.dispose();
     this.root?.traverse(o=>o.geometry?.dispose());this.root?.userData.boneTexture?.dispose();this.material?.dispose();this.translucentMaterial?.dispose();
     for(const entry of this.textureVariants||[]){entry.texture.dispose();entry.texture.image?.close?.();}
     this.releaseCardLayers();

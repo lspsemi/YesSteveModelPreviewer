@@ -117,6 +117,12 @@ export function createYsmAnimationContext(){
     return state.lastSimulation;
   };
   ysm.bone_rot=name=>context.boneRotationResolver?.(String(name??''))||{x:0,y:0,z:0};
+  // SoundFunction: play_sound(id, name[, flags[, volume[, pitch]]]); flag 4 loops.
+  // Contexts without an audio player (the character card) stay silent.
+  context.audio=null;
+  ysm.play_sound=(id,name,flags=0,volume=1,pitch=1)=>context.audio?.play(name,{id,loop:(Number(flags)&4)===4,volume:Number(volume)||1,pitch:Number(pitch)||1})?1:0;
+  ysm.stop_sound=id=>context.audio?.stop(id)?1:0;
+  ysm.stop_all_sounds=()=>{context.audio?.stopAll();return 1;};
   return context;
 }
 
@@ -200,23 +206,29 @@ export function animationBlendWeight(animation,context){
   if(animation?.blend_weight===undefined)return 1;
   return Math.max(0,evaluateMolang(animation.blend_weight,context));
 }
-// Sorted, precompiled events per animation timeline (parsed JSON, never mutated).
+// Sorted events per animation: precompiled timeline statements plus
+// sound_effects keyframes ({"t": {"effect": name}} or a list of them).
 const timelineCache=new WeakMap();
-function timelineEvents(timeline){
-  let events=timelineCache.get(timeline);
+function timelineEvents(animation){
+  let events=timelineCache.get(animation);
   if(!events){
-    events=Object.entries(timeline).map(([t,expr])=>({t:Number(t),compiled:compileStatementList(expr)})).filter(e=>Number.isFinite(e.t)).sort((a,b)=>a.t-b.t);
-    timelineCache.set(timeline,events);
+    const timeline=animation.timeline&&typeof animation.timeline==='object'?animation.timeline:{};
+    const sounds=animation.sound_effects&&typeof animation.sound_effects==='object'?animation.sound_effects:{};
+    events=[
+      ...Object.entries(timeline).map(([t,expr])=>({t:Number(t),compiled:compileStatementList(expr)})),
+      ...Object.entries(sounds).flatMap(([t,value])=>(Array.isArray(value)?value:[value]).map(item=>({t:Number(t),sound:String(item?.effect??'')})).filter(item=>item.sound)),
+    ].filter(e=>Number.isFinite(e.t)).sort((a,b)=>a.t-b.t);
+    timelineCache.set(animation,events);
   }
   return events;
 }
 export function executeTimeline(animation,time,ctx,state,loop){
-  if(!animation?.timeline||typeof animation.timeline!=='object')return;
+  if(!animation||typeof animation!=='object')return;
+  const events=timelineEvents(animation);if(!events.length)return;
   const length=animationLength(animation);
   let current=time,cycle=0;
   if(loop&&length>0&&Number.isFinite(length)){cycle=Math.floor(time/length);current=time%length;}
-  const events=timelineEvents(animation.timeline);
-  const run=(event)=>runStatementList(event.compiled,ctx);
+  const run=(event)=>{if(event.compiled)runStatementList(event.compiled,ctx);else ctx.audio?.play(event.sound);};
   if(state.last<0){for(const e of events)if(e.t<=current)run(e);}
   else if(cycle!==state.cycle||current<state.last){for(const e of events)if(e.t>state.last||e.t<=current)run(e);}
   else for(const e of events)if(e.t>state.last&&e.t<=current)run(e);

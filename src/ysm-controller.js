@@ -33,7 +33,8 @@ export function normalizeControllers(rawControllers={}){
         if(!entry||typeof entry!=='object')continue;
         for(const [animation,condition] of Object.entries(entry))if(animation)animations.push({name:animation,condition:typeof condition==='string'||typeof condition==='number'?condition:null});
       }
-      states.set(stateName,{animations,transitions,on_entry:Array.isArray(state?.on_entry)?state.on_entry:[],on_exit:Array.isArray(state?.on_exit)?state.on_exit:[]});
+      const soundEffects=(Array.isArray(state?.sound_effects)?state.sound_effects:state?.sound_effects?[state.sound_effects]:[]).map(item=>String(item?.effect??item??'')).filter(Boolean);
+      states.set(stateName,{animations,transitions,on_entry:Array.isArray(state?.on_entry)?state.on_entry:[],on_exit:Array.isArray(state?.on_exit)?state.on_exit:[],sound_effects:soundEffects});
     }
     normalized.set(name,{initial_state:controller?.initial_state||controller?.initial||'default',states});
   }
@@ -99,6 +100,7 @@ class ControllerInstance {
   enter(stateName,state,context,now){
     if(this.state)executeMolangStatements(this.state.on_exit,context);
     executeMolangStatements(state.on_entry,context);
+    for(const effect of state.sound_effects||[])context.audio?.play(effect);
     this.stateName=stateName;this.state=state;this.enterTime=now;
     const playsClips=stateName!==BUILTIN_STATE&&!stateName.startsWith(ENTRY_STATE_PREFIX);
     this.slots=playsClips?state.animations.map(entry=>({name:entry.name,condition:entry.condition,active:true,timeline:{last:-1,cycle:0}})):[];
@@ -197,12 +199,16 @@ export class YsmControllerRuntime {
     if(this.advance){context.query.anim_time=now;executeTimeline(animation,now,context,this.timeline(key),true);}
     sampleInto(layer,animation,now,'loop',context,this.index);
   }
-  // The main slot's built-in AnimationManager plays the selected clip as LOOP.
+  // The main slot's built-in AnimationManager plays the selected clip as LOOP;
+  // a request with loop:false plays it once and holds the end pose.
   sampleMain(layer,context){
     const request=this.mainRequest,animation=request&&this.animations[request.name];if(!animation)return;
-    if(this.advance){context.query.anim_time=request.time;executeTimeline(animation,request.time,context,this.timeline(`main:${request.name}`),true);}
-    sampleInto(layer,animation,request.time,'loop',context,this.index);
+    const loop=request.loop!==false;
+    if(this.advance){context.query.anim_time=request.time;executeTimeline(animation,request.time,context,this.timeline(`main:${request.name}`),loop);}
+    sampleInto(layer,animation,request.time,loop?'loop':'hold',context,this.index);
   }
+  /** Restarts the main clip's timeline so its events and sounds fire again. */
+  restartMain(name){this.timelines.delete(`main:${name}`);}
   apply({skeleton,context,now,main,advance=true}){
     if(!this.layer||this.layer.flags.length!==skeleton.count)this.layer=new BoneLayer(skeleton.count);
     this.index=skeleton.index;this.advance=advance;this.mainRequest=main;

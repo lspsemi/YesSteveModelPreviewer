@@ -289,12 +289,15 @@ async function loadImportedModel(byPath,sourceName){
   let controllerFiles=(metadata.files?.player?.animation_controllers||[]).map(path=>({path,file:getPackageFile(path)})).filter(entry=>entry.file);
   if(!controllerFiles.length)controllerFiles=[...byPath.entries()].filter(([path])=>/^controller\/.*\.json$/i.test(path)).map(([path,file])=>({path,file}));
   const avatarFiles=new Map([...byPath].filter(([path])=>path.toLowerCase().startsWith('avatar/')).map(([path,file])=>[path.toLowerCase(),file]));
+  const soundFiles=new Map();
+  for(const [path,file] of byPath){const match=/^sounds\/(.+)\.(?:ogg|wav|mp3)$/i.exec(path);if(match){soundFiles.set(match[1],file);if(!soundFiles.has(match[1].toLowerCase()))soundFiles.set(match[1].toLowerCase(),file);}}
   setModelBusy(true);
   try{
     await releaseViewer();await selectTab('preview');
     const loading=document.querySelector('#loading-state');loading.innerHTML='<span class="spinner"></span><strong>正在加载模型</strong><span>正在解析模型、贴图与动画…</span>';
     viewer=await ensureViewer();viewer.setTheme(document.documentElement.dataset.theme==='dark');
-    await viewer.loadFiles({model:modelFile,textures:textureEntries,texture:textureEntries[0]?.file,animationFiles,controllerFiles,metadata:viewerMetadataFile,bedrockModel:importedBedrockModel,cardBackground:getPackageFile(metadata.properties?.gui_background),cardBackgroundFallback:getPackageFile('background/gui_background.png'),cardForeground:getPackageFile(metadata.properties?.gui_foreground),cardForegroundFallback:getPackageFile('background/gui_foreground.png')});
+    viewer.onAnimationEnd=()=>{const idle=findAnimation('idle');if(idle)activateAnimation(idle,'待机');if(!document.querySelector('#action-wheel').hidden&&!actionWheelSettings)renderActionWheel();};
+    await viewer.loadFiles({soundFiles,model:modelFile,textures:textureEntries,texture:textureEntries[0]?.file,animationFiles,controllerFiles,metadata:viewerMetadataFile,bedrockModel:importedBedrockModel,cardBackground:getPackageFile(metadata.properties?.gui_background),cardBackgroundFallback:getPackageFile('background/gui_background.png'),cardForeground:getPackageFile(metadata.properties?.gui_foreground),cardForegroundFallback:getPackageFile('background/gui_foreground.png')});
     for(const [selector,url] of [['.cover-background',viewer.cardBackgroundUrl],['.cover-foreground',viewer.cardForegroundUrl]]){const layer=document.querySelector(selector);if(url){layer.src=url;layer.hidden=false;}else{layer.hidden=true;layer.removeAttribute('src');}}
     document.querySelector('.cover-card').classList.remove('is-empty');
     document.querySelector('#save-card-button').disabled=!viewer.previewAnimationName||!viewer.animations?.[viewer.previewAnimationName];
@@ -409,9 +412,9 @@ const findAnimation=kind=>{
   const patterns={idle:[/(?:^|[._-])idle(?:$|[._-])/i,/待机|站立/]};
   return names.find(name=>patterns[kind]?.some(pattern=>pattern.test(name)));
 };
-function activateAnimation(name,label){if(!name){toast(`当前模型没有${label}动画`);return false;}viewer.setAnimation(name);document.querySelector('#animation-name').textContent=label;document.querySelectorAll('[data-animation]').forEach(button=>button.classList.toggle('selected',button.dataset.animation===name));document.querySelectorAll('#pose-walk,#pose-run,#pose-jump').forEach(button=>button.classList.toggle('active',button.id===`pose-${label==='走'?'walk':label==='跑'?'run':label==='跳'?'jump':''}`));syncPlay();return true;}
+function activateAnimation(name,label,{once=false}={}){if(!name){toast(`当前模型没有${label}动画`);return false;}viewer.setAnimation(name,{once});document.querySelector('#animation-name').textContent=label;document.querySelectorAll('[data-animation]').forEach(button=>button.classList.toggle('selected',button.dataset.animation===name));document.querySelectorAll('#pose-walk,#pose-run,#pose-jump').forEach(button=>button.classList.toggle('active',button.id===`pose-${label==='走'?'walk':label==='跑'?'run':label==='跳'?'jump':''}`));syncPlay();return true;}
 let actionWheelPage=0,actionWheelPath=[],actionWheelSettings=null;
-const WHEEL_PREVIEW_ANIMATION='__ysm_preview_card_animation__';
+const WHEEL_PREVIEW_ANIMATION='__ysm_preview_card_animation__',WHEEL_RETURN='#return';
 const wheelText=value=>minecraftTextRuns(value).map(run=>run.text).join('').trim();
 const wheelEscape=value=>String(value??'').replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 function getWheelEntries(){
@@ -471,10 +474,10 @@ function renderActionWheel(){
     const d=`M ${ix} ${iy} L ${ox} ${oy} A 110.4 110.4 0 0 1 ${ex} ${ey} L ${fx} ${fy} A 36 36 0 0 0 ${ix} ${iy} Z`;
     if(!entry)return `<g class="wheel-sector-empty"><path d="${d}"/></g>`;
     const styledLabel=stripWheelMarker(entry.label),displayLabel=wheelText(styledLabel).replace(/^#/,'')||entry.id,label=wheelEscape(displayLabel),form=getWheelForm(entry.label),group=getWheelGroup(entry.id),isPreviewAnimation=entry.id===WHEEL_PREVIEW_ANIMATION,animation=isPreviewAnimation?viewer.previewAnimationName:(viewer.animations?.[entry.id]?entry.id:(viewer.animations?.[displayLabel]?displayLabel:''));
-    const isFolder=!!group||entry.id.startsWith('#'),hint=isFolder?'进入子目录':animation?`播放 ${displayLabel}`:'打开设置';
+    const isReturn=entry.id===WHEEL_RETURN,isFolder=!isReturn&&(!!group||entry.id.startsWith('#')),hint=isReturn?(actionWheelPath.length?'返回上一级':'停止动作'):isFolder?'进入子目录':animation?`播放 ${displayLabel}`:'打开设置';
     if(form)gearButtons.push(`<button type="button" class="wheel-sector-gear-button" data-wheel-settings="${wheelEscape(form.id)}" style="left:${gx/240*100}%;top:${gy/240*100}%" aria-label="${label} 设置" title="${label} 设置">${materialIcon('settings')}</button>`);
     const isPlaying=animation&&viewer.animationName===animation;
-    return `<g class="wheel-sector${isFolder?' wheel-sector-folder':''}${isPreviewAnimation?' wheel-sector-preview':''}${isPlaying?' is-playing':''}" role="menuitem" tabindex="0" data-wheel-entry="${wheelEscape(entry.id)}" aria-label="${label}，${wheelEscape(hint)}"${isPlaying?' aria-current="true"':''}><title>${label} · ${wheelEscape(hint)}</title><path d="${d}"/><text x="${tx}" y="${ty+3}" text-anchor="middle">${minecraftTextSvg(styledLabel)}</text></g>`;
+    return `<g class="wheel-sector${isFolder||isReturn?' wheel-sector-folder':''}${isPreviewAnimation?' wheel-sector-preview':''}${isPlaying?' is-playing':''}" role="menuitem" tabindex="0" data-wheel-entry="${wheelEscape(entry.id)}" aria-label="${label}，${wheelEscape(hint)}"${isPlaying?' aria-current="true"':''}><title>${label} · ${wheelEscape(hint)}</title><path d="${d}"/><text x="${tx}" y="${ty+3}" text-anchor="middle">${minecraftTextSvg(styledLabel)}</text></g>`;
   }).join('');
   const breadcrumbs=[{id:'',label:'根目录'},...actionWheelPath.map(id=>{const group=viewer.customAnimationGroups.find(item=>String(item.id)===String(id));return{id:String(id),label:group?.name||id};})];
   const breadcrumbMarkup=breadcrumbs.map((crumb,index)=>{
@@ -488,7 +491,7 @@ function renderActionWheel(){
   fitActionWheelControls();
   
   wheel.querySelectorAll('[data-wheel-entry]').forEach(item=>{
-    const activate=()=>{const id=item.dataset.wheelEntry,entry=entries.find(value=>value.id===id),group=getWheelGroup(id);if(group){actionWheelPath.push(String(group.id));actionWheelPage=0;renderActionWheel();return;}const entryLabel=wheelText(stripWheelMarker(entry?.label)),animation=id===WHEEL_PREVIEW_ANIMATION?viewer.previewAnimationName:(viewer.animations?.[id]?id:(viewer.animations?.[entryLabel]?entryLabel:''));if(animation){activateAnimation(animation,entryLabel||animation);renderActionWheel();return;}const form=getWheelForm(entry?.label);if(form)renderWheelSettings(form);};
+    const activate=()=>{const id=item.dataset.wheelEntry,entry=entries.find(value=>value.id===id);if(id===WHEEL_RETURN){if(actionWheelPath.length){actionWheelPath.pop();actionWheelPage=0;}else{const idle=findAnimation('idle');if(idle)activateAnimation(idle,'待机');}renderActionWheel();return;}const group=getWheelGroup(id);if(group){actionWheelPath.push(String(group.id));actionWheelPage=0;renderActionWheel();return;}const entryLabel=wheelText(stripWheelMarker(entry?.label)),animation=id===WHEEL_PREVIEW_ANIMATION?viewer.previewAnimationName:(viewer.animations?.[id]?id:(viewer.animations?.[entryLabel]?entryLabel:''));if(animation){activateAnimation(animation,entryLabel||animation,{once:true});renderActionWheel();return;}const form=getWheelForm(entry?.label);if(form)renderWheelSettings(form);};
     item.onclick=()=>activate();item.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
   });
   wheel.querySelectorAll('[data-wheel-settings]').forEach(item=>{const open=event=>{event.stopPropagation();const form=getWheelForm(item.dataset.wheelSettings);if(form)renderWheelSettings(form);};item.onclick=open;item.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open(event);}};});
