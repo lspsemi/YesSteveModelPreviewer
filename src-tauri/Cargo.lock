@@ -4785,7 +4785,7 @@ dependencies = [
 
 [[package]]
 name = "ysm-preview"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "percent-encoding",
  "tauri",

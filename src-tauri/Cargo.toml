@@ -1,6 +1,6 @@
 [package]
 name = "ysm-preview"
-version = "0.1.0"
+version = "1.0.0"
 description = "YSM 模型可视化查看器"
 edition = "2021"
 

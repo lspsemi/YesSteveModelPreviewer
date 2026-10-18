@@ -35,7 +35,9 @@ npm run desktop:build  # 构建发行版
 - `src-tauri/target/release/ysm-preview.exe`：可直接运行的单文件程序
 - `src-tauri/target/release/bundle/nsis/YSM 预览器_<版本>_x64-setup.exe`：安装包（安装到当前用户，无需管理员权限）
 
-发布新版本前，同步修改 `package.json` 和 `src-tauri/tauri.conf.json` 中的 `version`。
+发布新版本前，同步修改 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 中的版本号。
+
+截图水印功能在发行版中默认关闭（代码保留，开关见 `src/features.js`）。需要时以 `VITE_ENABLE_WATERMARK=true` 环境变量构建即可启用。
 桌面版中外部链接会用系统浏览器打开，截图和人物卡通过系统“另存为”对话框保存。
 
 ## 目录结构
@@ -46,8 +48,7 @@ npm run desktop:build  # 构建发行版
 │   └── desktop.js              # 仅在桌面版中启用的集成（外部链接、全屏）
 ├── public/
 │   ├── favicon.svg
-│   ├── fonts/
-│   └── assets/                 # 模组图标
+│   └── fonts/
 ├── src-tauri/                  # Tauri 桌面壳（Rust）、图标与打包配置
 ├── index.html
 ├── vite.config.js
